@@ -1,5 +1,13 @@
 package models
 
+import (
+	"math/rand"
+	"net/http"
+	"time"
+
+	"github.com/gorilla/websocket"
+)
+
 type SocketResponse struct {
 	SID          string   `json:"sid"`
 	Upgrades     []string `json:"upgrades"`
@@ -7,7 +15,13 @@ type SocketResponse struct {
 	PingTimeout  int      `json:"pingTimeout"`
 	MaxPayload   int      `json:"maxPayload"`
 }
-
+type GameManager struct {
+	KnownCards map[int][]int
+	KnownLens  map[int]int
+	Random     *rand.Rand
+	HttpClient *http.Client
+	Conn       *websocket.Conn
+}
 type GameResponse struct {
 	State       string `json:"state"`
 	GameSession struct {
@@ -38,4 +52,13 @@ type Game struct {
 	Board  [][]int `json:"board,omitempty"`
 	Scores []int   `json:"scores,omitempty"`
 	Opened []int   `json:"opened,omitempty"`
+}
+
+func NewGameManager(httpClient *http.Client) *GameManager {
+	return &GameManager{
+		KnownCards: make(map[int][]int),
+		KnownLens:  make(map[int]int),
+		Random:     rand.New(rand.NewSource(time.Now().UnixNano())),
+		HttpClient: httpClient,
+	}
 }

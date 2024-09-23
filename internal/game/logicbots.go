@@ -3,24 +3,23 @@ package game
 import (
 	"encoding/json"
 	"fmt"
-	"math/rand"
 	"socketiobot/internal/models"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
 
-var (
-	knownCards map[int][]int
-	knownLens  map[int]int
-)
-
-func init() {
-	knownCards = make(map[int][]int)
-	knownLens = make(map[int]int)
+type Manager struct {
+	gameManager *models.GameManager
 }
 
-func ParseGameResponse(jsonData string) (models.GameResponse, error) {
+func NewManager(gm *models.GameManager) *Manager {
+	return &Manager{
+		gameManager: gm,
+	}
+}
+
+func (m *Manager) ParseGameResponse(jsonData string) (models.GameResponse, error) {
 	var response []json.RawMessage
 	err := json.Unmarshal([]byte(jsonData), &response)
 	if err != nil {
@@ -40,30 +39,30 @@ func ParseGameResponse(jsonData string) (models.GameResponse, error) {
 	return gameResponse, nil
 }
 
-func UpdateKnownCards(board [][]int) {
+func (m *Manager) UpdateKnownCards(board [][]int) {
 	for i, stack := range board {
 		currentLen := len(stack)
-		if prevLen, exists := knownLens[i]; exists && currentLen != prevLen {
-			for card, positions := range knownCards {
+		if prevLen, exists := m.gameManager.KnownLens[i]; exists && currentLen != prevLen {
+			for card, positions := range m.gameManager.KnownCards {
 				for j, pos := range positions {
 					if pos == i {
-						knownCards[card] = append(positions[:j], positions[j+1:]...)
+						m.gameManager.KnownCards[card] = append(positions[:j], positions[j+1:]...)
 						break
 					}
 				}
-				if len(knownCards[card]) == 0 {
-					delete(knownCards, card)
+				if len(m.gameManager.KnownCards[card]) == 0 {
+					delete(m.gameManager.KnownCards, card)
 				}
 			}
 		}
-		knownLens[i] = currentLen
+		m.gameManager.KnownLens[i] = currentLen
 
 		if currentLen > 0 && stack[0] != -1 {
 			card := stack[0]
-			if _, ok := knownCards[card]; !ok {
-				knownCards[card] = []int{i}
-			} else if !Contains(knownCards[card], i) {
-				knownCards[card] = append(knownCards[card], i)
+			if _, ok := m.gameManager.KnownCards[card]; !ok {
+				m.gameManager.KnownCards[card] = []int{i}
+			} else if !Contains(m.gameManager.KnownCards[card], i) {
+				m.gameManager.KnownCards[card] = append(m.gameManager.KnownCards[card], i)
 			}
 		}
 	}
@@ -78,8 +77,8 @@ func Contains(slice []int, item int) bool {
 	return false
 }
 
-func FindBestMove(board [][]int) (int, int) {
-	for _, positions := range knownCards {
+func (m *Manager) FindBestMove(board [][]int) (int, int) {
+	for _, positions := range m.gameManager.KnownCards {
 		if len(positions) == 2 {
 			return positions[0], positions[1]
 		}
@@ -93,39 +92,41 @@ func FindBestMove(board [][]int) (int, int) {
 	}
 
 	if len(availablePositions) > 0 {
-		randomIndex := rand.Intn(len(availablePositions))
+		randomIndex := m.gameManager.Random.Intn(len(availablePositions))
 		return availablePositions[randomIndex], -1
 	}
 
 	return -1, -1
 }
 
-func MakeMove(conn *websocket.Conn, gameID string, board [][]int) error {
-	firstCard, secondCard := FindBestMove(board)
+func (m *Manager) MakeMove(conn *websocket.Conn, gameID string, board [][]int) error {
+	firstCard, secondCard := m.FindBestMove(board)
 
 	if firstCard == -1 {
 		return fmt.Errorf("нет доступных ходов")
 	}
 
-	if err := SendTurn(conn, gameID, firstCard); err != nil {
+	if err := m.SendTurn(conn, gameID, firstCard); err != nil {
 		return err
 	}
 
 	if secondCard != -1 {
 		time.Sleep(750 * time.Millisecond)
-		return SendTurn(conn, gameID, secondCard)
+		return m.SendTurn(conn, gameID, secondCard)
 	}
 
 	return nil
 }
-func SendTurn(conn *websocket.Conn, gameID string, position int) error {
+
+func (m *Manager) SendTurn(conn *websocket.Conn, gameID string, position int) error {
 	turnData := map[string]interface{}{
 		"columnId":      position,
 		"gameSessionId": gameID,
 	}
-	return SendSocketRequest(conn, "turn", turnData)
+	return m.SendSocketRequest(conn, "turn", turnData)
 }
-func SendSocketRequest(conn *websocket.Conn, event string, data interface{}) error {
+
+func (m *Manager) SendSocketRequest(conn *websocket.Conn, event string, data interface{}) error {
 	payload, err := json.Marshal([]interface{}{event, data})
 	if err != nil {
 		return fmt.Errorf("ошибка при маршалинге данных: %v", err)

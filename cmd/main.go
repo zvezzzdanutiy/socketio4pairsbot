@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"socketiobot/internal/game"
+	"socketiobot/internal/models"
 	"socketiobot/internal/network"
 	"strings"
 	"time"
@@ -24,6 +25,8 @@ func main() {
 		Timeout: 5 * time.Second,
 		Jar:     jar,
 	}
+	GameManagerCreate := models.NewGameManager(client)
+	GameManager := game.NewManager(GameManagerCreate)
 	baseURL := "http://127.0.0.1:3000/ws/game/"
 	response, err := network.FetchAndParseSocketResponse(baseURL, *client)
 	if err != nil {
@@ -111,17 +114,17 @@ func main() {
 			}
 			if check == "gs" {
 				trimmedResponse := strings.TrimPrefix(string(message), "42")
-				gameResponse, err := game.ParseGameResponse(trimmedResponse)
+				gameResponse, err := GameManager.ParseGameResponse(trimmedResponse)
 				if err != nil {
 					fmt.Printf("Ошибка: %v\n", err)
 					return
 				}
 				board := gameResponse.GameSession.Game.Board
-				game.UpdateKnownCards(board)
+				GameManager.UpdateKnownCards(board)
 
 				for _, participant := range gameResponse.GameSession.Participants {
 					if participant.IsActive {
-						err := game.MakeMove(websocketconnect, gameResponse.GameSession.ID, board)
+						err := GameManager.MakeMove(websocketconnect, gameResponse.GameSession.ID, board)
 						fmt.Println("Ход отправлен")
 						if err != nil {
 							fmt.Printf("Ошибка при совершении хода: %v\n", err)
