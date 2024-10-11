@@ -3,7 +3,7 @@ package game
 import (
 	"encoding/json"
 	"fmt"
-	"socketiobot/internal/models"
+	"socketio4/internal/models"
 	"time"
 
 	"github.com/gorilla/websocket"
