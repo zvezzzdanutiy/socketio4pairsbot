@@ -1,39 +1,8 @@
 package models
 
 import (
-	"math/rand"
-	"net/http"
 	"time"
-
-	"github.com/gorilla/websocket"
 )
-
-type SocketResponse struct {
-	SID          string   `json:"sid"`
-	Upgrades     []string `json:"upgrades"`
-	PingInterval int      `json:"pingInterval"`
-	PingTimeout  int      `json:"pingTimeout"`
-	MaxPayload   int      `json:"maxPayload"`
-}
-type GameManager struct {
-	KnownCards map[int][]int
-	KnownLens  map[int]int
-	Random     *rand.Rand
-	HttpClient *http.Client
-	Conn       *websocket.Conn
-}
-type GameResponse struct {
-	State       string `json:"state"`
-	GameSession struct {
-		ID                string        `json:"id"`
-		Participants      []Participant `json:"participants"`
-		MaxParticipants   int           `json:"maxParticipants"`
-		State             string        `json:"state"`
-		LastTurnTimestamp int64         `json:"lastTurnTimestamp"`
-		TurnTimeout       int           `json:"turnTimeout"`
-		Game              Game          `json:"game"`
-	} `json:"gameSession"`
-}
 
 type Participant struct {
 	UserID   int    `json:"userId"`
@@ -43,22 +12,49 @@ type Participant struct {
 	Score    int    `json:"score"`
 }
 
-type Game struct {
-	Properties struct {
-		Columns   int `json:"columns"`
-		Pairs     int `json:"pairs"`
-		MaxCardID int `json:"maxCardId"`
-	} `json:"properties"`
-	Board  [][]int `json:"board,omitempty"`
-	Scores []int   `json:"scores,omitempty"`
-	Opened []int   `json:"opened,omitempty"`
+type GameProperties struct {
+	Columns  int `json:"columns"`
+	MaxChips int `json:"maxChips"`
 }
 
-func NewGameManager(httpClient *http.Client) *GameManager {
-	return &GameManager{
-		KnownCards: make(map[int][]int),
-		KnownLens:  make(map[int]int),
-		Random:     rand.New(rand.NewSource(time.Now().UnixNano())),
-		HttpClient: httpClient,
+type GameDetails struct {
+	Properties GameProperties `json:"properties"`
+	Board      [][]int        `json:"board"`
+	Stroke     [][]int        `json:"stroke"`
+	Type       string         `json:"type"`
+}
+
+type Game struct {
+	ID                string        `json:"id"`
+	Participants      []Participant `json:"participants"`
+	MaxParticipants   int           `json:"maxParticipants"`
+	State             string        `json:"state"`
+	LastTurnTimestamp int64         `json:"lastTurnTimestamp"`
+	TurnTimeout       int           `json:"turnTimeout"`
+	Game              GameDetails   `json:"game"`
+}
+
+type Turn struct {
+	ColumnID      int    `json:"columnId"`
+	GameSessionID string `json:"gameSessionId"`
+}
+
+func NewGameManager() *Game {
+	return &Game{
+		ID:                "",
+		Participants:      []Participant{},
+		MaxParticipants:   0,
+		State:             "",
+		LastTurnTimestamp: time.Now().Unix(),
+		TurnTimeout:       0,
+		Game: GameDetails{
+			Properties: GameProperties{
+				Columns:  0,
+				MaxChips: 0,
+			},
+			Board:  [][]int{},
+			Stroke: [][]int{},
+			Type:   "",
+		},
 	}
 }

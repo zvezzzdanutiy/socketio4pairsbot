@@ -1,136 +1,159 @@
 package game
 
 import (
-	"encoding/json"
 	"fmt"
+	"math/rand"
 	"socketio4/internal/models"
-	"time"
 
-	"github.com/gorilla/websocket"
+	socketio_v5_client "github.com/maldikhan/go.socket.io/socket.io/v5/client"
+	"github.com/maldikhan/go.socket.io/socket.io/v5/client/emit"
 )
 
 type Manager struct {
-	gameManager *models.GameManager
+	gameManager *models.Game
 }
 
-func NewManager(gm *models.GameManager) *Manager {
+func NewManager(gm *models.Game) *Manager {
 	return &Manager{
 		gameManager: gm,
 	}
 }
 
-func (m *Manager) ParseGameResponse(jsonData string) (models.GameResponse, error) {
-	var response []json.RawMessage
-	err := json.Unmarshal([]byte(jsonData), &response)
-	if err != nil {
-		return models.GameResponse{}, fmt.Errorf("ошибка при разборе JSON: %v", err)
+const (
+	COLUMNS = 7
+	CONNECT = 4
+	EMPTY   = -1
+	ENEMY   = 0
+	BOT     = 1
+)
+
+func (m *Manager) MakeTurn(client *socketio_v5_client.Client, game models.Game) {
+	board := game.Game.Board
+	columnId := getBestMove(board)
+
+	turn := models.Turn{
+		ColumnID:      columnId,
+		GameSessionID: game.ID,
 	}
 
-	if len(response) < 2 {
-		return models.GameResponse{}, fmt.Errorf("некорректный формат JSON")
-	}
-
-	var gameResponse models.GameResponse
-	err = json.Unmarshal(response[1], &gameResponse.GameSession)
-	if err != nil {
-		return models.GameResponse{}, fmt.Errorf("ошибка при разборе GameSession: %v", err)
-	}
-
-	return gameResponse, nil
+	client.Emit("turn", turn, emit.WithAck(func(response interface{}) {
+		fmt.Printf("Turn response: %v\n", response)
+	}))
 }
 
-func (m *Manager) UpdateKnownCards(board [][]int) {
-	for i, stack := range board {
-		currentLen := len(stack)
-		if prevLen, exists := m.gameManager.KnownLens[i]; exists && currentLen != prevLen {
-			for card, positions := range m.gameManager.KnownCards {
-				for j, pos := range positions {
-					if pos == i {
-						m.gameManager.KnownCards[card] = append(positions[:j], positions[j+1:]...)
-						break
-					}
-				}
-				if len(m.gameManager.KnownCards[card]) == 0 {
-					delete(m.gameManager.KnownCards, card)
-				}
+func getBestMove(board [][]int) int {
+	for col := 0; col < COLUMNS; col++ {
+		if isValidMove(board, col) {
+			row := len(board[col])
+			board[col] = append(board[col], BOT)
+			if checkWin(board, row, col, BOT) {
+				board[col] = board[col][:len(board[col])-1]
+				return col
 			}
+			board[col] = board[col][:len(board[col])-1]
 		}
-		m.gameManager.KnownLens[i] = currentLen
+	}
 
-		if currentLen > 0 && stack[0] != -1 {
-			card := stack[0]
-			if _, ok := m.gameManager.KnownCards[card]; !ok {
-				m.gameManager.KnownCards[card] = []int{i}
-			} else if !Contains(m.gameManager.KnownCards[card], i) {
-				m.gameManager.KnownCards[card] = append(m.gameManager.KnownCards[card], i)
+	for col := 0; col < COLUMNS; col++ {
+		if isValidMove(board, col) {
+			row := len(board[col])
+			board[col] = append(board[col], ENEMY)
+			if checkWin(board, row, col, ENEMY) {
+				board[col] = board[col][:len(board[col])-1]
+				return col
+			}
+			board[col] = board[col][:len(board[col])-1]
+		}
+	}
+
+	if isValidMove(board, 3) {
+		return 3
+	}
+
+	validMoves := []int{}
+	for col := 0; col < COLUMNS; col++ {
+		if isValidMove(board, col) {
+			validMoves = append(validMoves, col)
+		}
+	}
+	if len(validMoves) > 0 {
+		return validMoves[rand.Intn(len(validMoves))]
+	}
+
+	return -1
+}
+
+func isValidMove(board [][]int, col int) bool {
+	return col >= 0 && col < COLUMNS && len(board[col]) < 7
+}
+
+func checkWin(board [][]int, row, col, player int) bool {
+
+	// Вертикаль
+	if len(board[col]) >= CONNECT {
+		count := 0
+		for i := len(board[col]) - 1; i >= 0; i-- {
+			if board[col][i] == player {
+				count++
+				if count == CONNECT {
+					return true
+				}
+			} else {
+				break
 			}
 		}
 	}
-}
 
-func Contains(slice []int, item int) bool {
-	for _, v := range slice {
-		if v == item {
-			return true
+	// Горизонталь
+	count := 0
+	for c := 0; c < COLUMNS; c++ {
+		if len(board[c]) > row && board[c][row] == player {
+			count++
+			if count == CONNECT {
+				return true
+			}
+		} else {
+			count = 0
+		}
+	}
+
+	// Диагональ (слева направо)
+	count = 0
+	for r, c := row-min(row, col), col-min(row, col); c < COLUMNS; r, c = r+1, c+1 {
+		if r < 0 || c < 0 || len(board[c]) <= r {
+			break
+		}
+		if board[c][r] == player {
+			count++
+			if count == CONNECT {
+				return true
+			}
+		} else {
+			count = 0
+		}
+	}
+
+	// Диагональ (справа налево)
+	count = 0
+	for r, c := row-min(row, COLUMNS-1-col), col+min(row, COLUMNS-1-col); c >= 0; r, c = r+1, c-1 {
+		if r < 0 || c < 0 || len(board[c]) <= r {
+			break
+		}
+		if board[c][r] == player {
+			count++
+			if count == CONNECT {
+				return true
+			}
+		} else {
+			count = 0
 		}
 	}
 	return false
 }
 
-func (m *Manager) FindBestMove(board [][]int) (int, int) {
-	for _, positions := range m.gameManager.KnownCards {
-		if len(positions) == 2 {
-			return positions[0], positions[1]
-		}
+func min(a, b int) int {
+	if a < b {
+		return a
 	}
-
-	availablePositions := make([]int, 0)
-	for i, stack := range board {
-		if len(stack) > 0 {
-			availablePositions = append(availablePositions, i)
-		}
-	}
-
-	if len(availablePositions) > 0 {
-		randomIndex := m.gameManager.Random.Intn(len(availablePositions))
-		return availablePositions[randomIndex], -1
-	}
-
-	return -1, -1
-}
-
-func (m *Manager) MakeMove(conn *websocket.Conn, gameID string, board [][]int) error {
-	firstCard, secondCard := m.FindBestMove(board)
-
-	if firstCard == -1 {
-		return fmt.Errorf("нет доступных ходов")
-	}
-
-	if err := m.SendTurn(conn, gameID, firstCard); err != nil {
-		return err
-	}
-
-	if secondCard != -1 {
-		time.Sleep(750 * time.Millisecond)
-		return m.SendTurn(conn, gameID, secondCard)
-	}
-
-	return nil
-}
-
-func (m *Manager) SendTurn(conn *websocket.Conn, gameID string, position int) error {
-	turnData := map[string]interface{}{
-		"columnId":      position,
-		"gameSessionId": gameID,
-	}
-	return m.SendSocketRequest(conn, "turn", turnData)
-}
-
-func (m *Manager) SendSocketRequest(conn *websocket.Conn, event string, data interface{}) error {
-	payload, err := json.Marshal([]interface{}{event, data})
-	if err != nil {
-		return fmt.Errorf("ошибка при маршалинге данных: %v", err)
-	}
-	message := fmt.Sprintf("42%s", string(payload))
-	return conn.WriteMessage(websocket.TextMessage, []byte(message))
+	return b
 }
